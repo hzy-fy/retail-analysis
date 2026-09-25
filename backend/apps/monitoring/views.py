@@ -165,17 +165,45 @@ def traffic_trend(request):
 
 @api_view(['GET'])
 def heatmap(request):
-    """区域热力图：轨迹点聚合到网格（echarts heatmap 格式）"""
+    """区域热力图：轨迹点聚合到网格并做高斯扩散平滑（echarts heatmap 格式）"""
+    import numpy as np
     d, cid = _parse_date(request), _camera_id(request)
-    grid_w, grid_h = 48, 27
+    grid_w, grid_h = 64, 36
     qs = TrackPoint.objects.filter(camera_id=cid, ts__date=d)
-    grid = {}
-    for p in qs.values_list('x', 'y'):
-        gx, gy = int(p[0] * grid_w), int(p[1] * grid_h)
-        gx, gy = min(gx, grid_w - 1), min(gy, grid_h - 1)
-        grid[(gx, gy)] = grid.get((gx, gy), 0) + 1
-    data = [[gx, gy, v] for (gx, gy), v in grid.items()]
-    return Response({'grid_w': grid_w, 'grid_h': grid_h, 'data': data})
+
+    acc = np.zeros((grid_h, grid_w), dtype=np.float32)
+    total = 0
+    for x, y in qs.values_list('x', 'y'):
+        gx, gy = int(x * grid_w), int(y * grid_h)
+        gx, gy = min(max(gx, 0), grid_w - 1), min(max(gy, 0), grid_h - 1)
+        # 3×3 高斯核扩散，避免单点稀疏、让热力呈连续团状
+        acc[gy, gx] += 4
+        if gy - 1 >= 0: acc[gy - 1, gx] += 1.5
+        if gy + 1 < grid_h: acc[gy + 1, gx] += 1.5
+        if gx - 1 >= 0: acc[gy, gx - 1] += 1.5
+        if gx + 1 < grid_w: acc[gy, gx + 1] += 1.5
+        if gy - 1 >= 0 and gx - 1 >= 0: acc[gy - 1, gx - 1] += 0.75
+        if gy - 1 >= 0 and gx + 1 < grid_w: acc[gy - 1, gx + 1] += 0.75
+        if gy + 1 < grid_h and gx - 1 >= 0: acc[gy + 1, gx - 1] += 0.75
+        if gy + 1 < grid_h and gx + 1 < grid_w: acc[gy + 1, gx + 1] += 0.75
+        total += 1
+
+    # 再做一次 3×3 均值卷积，进一步平滑
+    padded = np.pad(acc, 1, mode='constant')
+    kernel = np.ones((3, 3), dtype=np.float32) / 9
+    smooth = np.zeros_like(acc)
+    for i in range(3):
+        for j in range(3):
+            smooth += padded[i:i + grid_h, j:j + grid_w] * kernel[i, j]
+
+    # 只下发有热度的格子，数值保留一位小数
+    ys, xs = np.where(smooth > 0.05)
+    data = [[int(x), int(y), round(float(smooth[y, x]), 1)] for y, x in zip(ys, xs)]
+    peak = round(float(smooth.max()), 1) if data else 0
+    return Response({
+        'grid_w': grid_w, 'grid_h': grid_h, 'data': data,
+        'max': peak, 'total_points': total, 'cells': len(data),
+    })
 
 
 @api_view(['GET'])

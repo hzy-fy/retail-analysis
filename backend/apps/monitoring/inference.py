@@ -82,12 +82,33 @@ class CameraEngine(threading.Thread):
         dwell_state = {}          # (track_id, roi_id) -> {'record': DwellRecord, 'last_inside': ts}
         track_trail = defaultdict(list)   # track_id -> [(x,y), ...] 最近轨迹
         track_last_point = {}     # track_id -> ts 上次入库轨迹点时间
-        track_prev_center = {}    # track_id -> (x, y) 上一帧脚底点（用于绊线穿越判定）
+        track_prev_center = {}    # 显示ID -> (x, y) 上一帧脚底点（用于绊线穿越判定）
         line_cooldown = {}        # (track_id, line_id) -> ts 穿越冷却
         fall_state = {}           # track_id -> {'count': int, 'alarmed': bool}
         crowd_cooldown = {}       # roi_id -> ts
         loiter_alarmed = set()    # (track_id, roi_id)
         new_alarms = []
+        # 人物编号每 10 分钟一个周期，周期内从 0 开始连续编号
+        cycle_seconds = getattr(settings, 'TRACK_RESET_SECONDS', 600)
+        cycle_window = [int(time.time() // cycle_seconds)]
+        tid_map = {}              # ByteTrack 原始ID -> 周期内显示ID
+
+        def reset_cycle(current_time):
+            """新统计周期：结算进行中的驻留，清空所有按人跟踪的状态，编号重新从 0 开始"""
+            for key in list(dwell_state.keys()):
+                rec = dwell_state[key]['record']
+                rec.leave_time = current_time
+                rec.duration = max((current_time - rec.enter_time).total_seconds(), 0)
+                rec.is_active = False
+                rec.save(update_fields=['leave_time', 'duration', 'is_active'])
+            dwell_state.clear()
+            track_prev_center.clear()
+            track_trail.clear()
+            track_last_point.clear()
+            fall_state.clear()
+            line_cooldown.clear()
+            loiter_alarmed.clear()
+            tid_map.clear()
 
         self.status = 'running'
         self._broadcast_status()
@@ -111,6 +132,11 @@ class CameraEngine(threading.Thread):
                                   tracker='bytetrack.yaml', imgsz=640)[0]
 
             now = timezone.now()
+            # 编号周期切换（默认每 10 分钟）：编号从 0 重新计数
+            win = int(now.timestamp() // cycle_seconds)
+            if win != cycle_window[0]:
+                cycle_window[0] = win
+                reset_cycle(now)
             today = now.date()
             if self._today_date != today:  # 跨天重置内存计数
                 self._today_date = today
@@ -127,9 +153,13 @@ class CameraEngine(threading.Thread):
                 kpts = results.keypoints.xy.cpu().numpy() if results.keypoints is not None else None
                 xyxy = boxes.xyxy.cpu().numpy()
                 ids = boxes.id.cpu().numpy().astype(int)
-                for i, tid in enumerate(ids):
+                for i, raw_tid in enumerate(ids):
                     x1, y1, x2, y2 = [float(v) for v in xyxy[i]]
-                    tid = int(tid)
+                    # 周期内显示编号：从 0 开始连续分配
+                    raw_tid = int(raw_tid)
+                    if raw_tid not in tid_map:
+                        tid_map[raw_tid] = len(tid_map)
+                    tid = tid_map[raw_tid]
                     cx, cy = (x1 + x2) / 2 / w, (y1 + y2) / 2 / h
                     foot_x, foot_y = cx, y2 / h   # 用底部中心做区域判定更贴近真实站位
                     active_track_ids.add(tid)
@@ -269,6 +299,8 @@ class CameraEngine(threading.Thread):
                         'current': len(active_track_ids),
                         'today_enter': self._today_enter,
                         'today_exit': self._today_exit,
+                        'cycle_seconds': cycle_seconds,
+                        'cycle_window': cycle_window[0],
                     },
                     'roi_counts': {str(r.id): len(roi_inside.get(r.id, ())) for r in rois},
                     'active_dwells': {

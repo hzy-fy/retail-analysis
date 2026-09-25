@@ -45,8 +45,14 @@
           <div ref="trendRef" class="echart"></div>
         </div>
         <div class="panel">
-          <div class="panel-title">区域热力图（{{ date || '今日' }}）</div>
-          <div ref="heatRef" class="echart"></div>
+          <div class="panel-title">
+            区域热力图（{{ date || '今日' }}）
+            <span class="panel-sub" v-if="heatMeta.total">采样 {{ heatMeta.total }} 点 · 峰值 {{ heatMeta.max }}</span>
+          </div>
+          <div class="chart-box">
+            <div ref="heatRef" class="echart"></div>
+            <div v-if="!heatMeta.total" class="chart-empty">暂无轨迹数据<br/>启动分析后将自动累积</div>
+          </div>
         </div>
         <div class="panel">
           <div class="panel-title">货架停留时长排行</div>
@@ -77,6 +83,7 @@ import { getDashboard, getTrafficTrend, getHeatmap, getDwellByRoi } from '../api
 const date = ref<string>('')
 const fullscreen = ref(false)
 const dashboard = reactive<any>({ latest_alarms: [], top_rois: [] })
+const heatMeta = reactive({ total: 0, max: 0 })
 const trendRef = ref<HTMLDivElement>()
 const heatRef = ref<HTMLDivElement>()
 const barRef = ref<HTMLDivElement>()
@@ -135,19 +142,29 @@ function renderTrend(data: any) {
 function renderHeat(data: any) {
   if (!heatRef.value) return
   if (!heatChart) heatChart = echarts.init(heatRef.value)
+  heatMeta.total = data.total_points || 0
+  heatMeta.max = data.max || 0
   const xData = Array.from({ length: data.grid_w }, (_, i) => i)
   const yData = Array.from({ length: data.grid_h }, (_, i) => i)
+  // 峰值取后端真实值，至少为 1 避免色阶失效
+  const vmax = Math.max(data.max || 0, 1)
   heatChart.setOption({
-    tooltip: { position: 'top' },
-    grid: { left: 30, right: 14, top: 10, bottom: 46 },
+    tooltip: {
+      position: 'top',
+      formatter: (p: any) => `位置 (${p.value[0]}, ${p.value[1]})<br/>热度：${p.value[2]}`,
+    },
+    grid: { left: 8, right: 8, top: 8, bottom: 38, containLabel: false },
     xAxis: { type: 'category', data: xData, show: false, splitLine: { show: false } },
     yAxis: { type: 'category', data: yData, show: false, inverse: true, splitLine: { show: false } },
-    visualMap: { min: 0, max: 100, calculable: true, orient: 'horizontal', bottom: 4, left: 'center',
-      itemWidth: 12, itemHeight: 120, textStyle: { color: '#5b6b7d', fontSize: 11 },
-      inRange: { color: ['#eaf2fa', '#7fb2dc', '#2f6fae', '#1d3f6b'] } },
+    visualMap: { min: 0, max: vmax, calculable: true, orient: 'horizontal', bottom: 0, left: 'center',
+      itemWidth: 10, itemHeight: 110, precision: 0,
+      textStyle: { color: '#5b6b7d', fontSize: 11 },
+      inRange: { color: ['#edf4fb', '#a9cdea', '#4f93cd', '#1d5a96', '#0d3a66'] } },
     series: [{
       name: '热力', type: 'heatmap', data: data.data,
-      emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(47,111,174,.4)' } },
+      progressive: 1000,
+      itemStyle: { borderWidth: 0 },
+      emphasis: { itemStyle: { shadowBlur: 12, shadowColor: 'rgba(47,111,174,.45)' } },
     }],
   }, { notMerge: true })
 }
@@ -249,9 +266,15 @@ onUnmounted(() => {
   overflow: hidden;
 }
 .panel-title { flex: none; font-size: 14px; font-weight: 650; color: var(--text-1); margin-bottom: 10px;
-  padding-left: 8px; border-left: 3px solid var(--brand-500); line-height: 14px; }
+  padding-left: 8px; border-left: 3px solid var(--brand-500); line-height: 14px;
+  display: flex; align-items: center; justify-content: space-between; }
+.panel-sub { font-size: 11px; font-weight: 400; color: var(--text-3); }
 
-.echart { flex: 1; min-height: 0; width: 100%; }
+.chart-box { flex: 1; min-height: 0; position: relative; }
+.panel > .echart { flex: 1; }
+.chart-box .echart { height: 100%; }
+.chart-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  text-align: center; color: var(--text-3); font-size: 13px; line-height: 2; pointer-events: none; }
 
 /* KPI */
 .kpi { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: 1fr 1fr; gap: 10px; }

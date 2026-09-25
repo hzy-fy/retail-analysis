@@ -38,6 +38,7 @@
               <div class="label">今日离店</div>
             </div>
           </div>
+          <div class="cycle-tip" v-if="cycleStart">人物编号每 10 分钟重新计数 · 当前周期 {{ cycleStart }} 起</div>
         </el-card>
         <el-card shadow="never" style="margin-top:16px">
           <template #header><span>货架驻留状态</span></template>
@@ -89,7 +90,12 @@ const rois = ref<Roi[]>([])
 const lines = ref<Line[]>([])
 const engineStatus = ref('stopped')
 const engineMessage = ref('')
-const stats = reactive({ current: 0, today_enter: 0, today_exit: 0 })
+const stats = reactive({ current: 0, today_enter: 0, today_exit: 0, cycle_window: 0 })
+const cycleStart = computed(() => {
+  if (!stats.cycle_window) return ''
+  const d = new Date(stats.cycle_window * 1000)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+})
 const roiCounts = reactive<Record<string, number>>({})
 const activeDwells = reactive<Record<string, number>>({})
 const alarms = ref<any[]>([])
@@ -201,6 +207,7 @@ function onWsMessage(data: any) {
   stats.current = data.stats.current
   stats.today_enter = data.stats.today_enter
   stats.today_exit = data.stats.today_exit
+  stats.cycle_window = data.stats.cycle_window || 0
   Object.assign(roiCounts, data.roi_counts)
   Object.keys(activeDwells).forEach(k => delete activeDwells[k])
   Object.assign(activeDwells, data.active_dwells)
@@ -270,6 +277,8 @@ onUnmounted(() => {
 .monitor-canvas { width: 100%; display: block; }
 .error-tip { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #F56C6C; background: rgba(0,0,0,.6); gap: 8px; }
 .stats { display: flex; justify-content: space-around; text-align: center; }
+.cycle-tip { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--blue-gray-400);
+  text-align: center; font-size: 11px; color: var(--text-3); }
 .num { font-size: 28px; font-weight: 700; color: var(--brand-600); }
 .num.in { color: #4caf7d; }
 .num.out { color: #e0a030; }

@@ -105,3 +105,5 @@ YOLO_WEIGHTS = os.environ.get('YOLO_WEIGHTS', str(BASE_DIR / 'weights' / 'yolov8
 # 推理帧率与推流宽度
 INFERENCE_FPS = 5
 STREAM_WIDTH = 640
+# 人物编号重置周期（秒）：每个周期内编号从 0 开始
+TRACK_RESET_SECONDS = int(os.environ.get('TRACK_RESET_SECONDS', 600))
