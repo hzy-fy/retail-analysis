@@ -158,7 +158,7 @@ function initBar(rows: any[]) {
   barChart.on('click', (params: any) => {
     const roiId = rows[params.dataIndex]?.roi_id
     if (roiId) {
-      window.open(`/#/reports?roi=${roiId}&date=${date.value || ''}`, '_blank')
+      window.open(`/reports?roi=${roiId}&date=${date.value || ''}`, '_blank')
     }
   })
 }
