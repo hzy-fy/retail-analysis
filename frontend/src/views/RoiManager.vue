@@ -21,15 +21,15 @@
           <template v-if="snapshotOk">
             <img ref="imgRef" :src="imgSrc" class="bg" @load="onImgLoad" crossorigin="anonymous" />
             <canvas ref="canvasRef" class="overlay"
-              @mousedown="onDown" @mousemove="onMove" @mouseup="onUp" @dblclick="onDblClick" />
+              @mousedown="onDown" @mousemove="onMove" @mouseleave="hoverPos = null; redraw()" @dblclick="onDblClick" />
           </template>
           <el-empty v-else description="暂无画面快照，请先在「实时监控」页启动分析">
             <el-button type="primary" @click="$router.push('/monitor')">去启动</el-button>
           </el-empty>
         </div>
-        <div class="hint" v-if="mode === 'polygon'">单击添加顶点，双击结束绘制</div>
-        <div class="hint" v-else-if="mode === 'rect'">按住鼠标拖拽绘制矩形</div>
-        <div class="hint" v-else-if="mode === 'line'">单击两点绘制入口线，箭头方向为进店方向</div>
+        <div class="hint" v-if="mode === 'polygon'">单击添加顶点，点击起点（自动吸附）或双击闭合区域，Ctrl+Z 撤销</div>
+        <div class="hint" v-else-if="mode === 'rect'">单击确定起点，移动鼠标预览，再次单击确定对角点</div>
+        <div class="hint" v-else-if="mode === 'line'">单击确定起点，移动鼠标预览，再次单击确定终点，箭头方向为进店方向</div>
       </el-card>
 
       <el-card shadow="never" style="margin-top:16px" v-if="pendingShape">
@@ -121,8 +121,9 @@ const snapshotLoading = ref(false)
 const draftPoints = reactive<number[][]>([])   // 归一化坐标草稿
 const pendingShape = ref<string | null>(null)
 const form = reactive({ shelfName: '', shelfCode: '', color: '#409EFF', name: '入口线', flip: false })
-let drawingRect = false
-let rectStart: number[] | null = null
+const hoverPos = ref<number[] | null>(null)    // 鼠标当前位置（归一化，未夹取）
+const PAD = 60                                  // 画布外扩遮罩区宽度(px)
+let pendingStart: number[] | null = null        // 点击-移动-点击 模式的起点
 
 async function loadData() {
   const cams: any = await getCameras()
@@ -154,48 +155,79 @@ function onImgLoad() {
   snapshotOk.value = true
   snapshotLoading.value = false
   const canvas = canvasRef.value!, img = imgRef.value!
-  canvas.width = img.clientWidth
-  canvas.height = img.clientHeight
+  // 画布比快照大一圈，外圈为遮罩区（可越界绘制，落点取边界值）
+  canvas.width = img.clientWidth + PAD * 2
+  canvas.height = img.clientHeight + PAD * 2
   redraw()
 }
 
+/** 鼠标事件 → 归一化坐标（相对于快照有效区，可超出 0~1） */
 function norm(e: MouseEvent): number[] {
   const canvas = canvasRef.value!
   const rect = canvas.getBoundingClientRect()
-  return [(e.clientX - rect.left) / canvas.width, (e.clientY - rect.top) / canvas.height]
+  const iw = canvas.width - PAD * 2, ih = canvas.height - PAD * 2
+  return [(e.clientX - rect.left - PAD) / iw, (e.clientY - rect.top - PAD) / ih]
+}
+
+/** 越界点夹取到有效区边界 */
+function clamp01(p: number[]): number[] {
+  return [Math.min(1, Math.max(0, p[0])), Math.min(1, Math.max(0, p[1]))]
+}
+
+/** 多边形起点弱吸附：距起点 < 12px 时吸附到起点 */
+function snapToStart(p: number[]): { point: number[]; snapped: boolean } {
+  if (mode.value === 'polygon' && draftPoints.length >= 1) {
+    const canvas = canvasRef.value!
+    const iw = canvas.width - PAD * 2, ih = canvas.height - PAD * 2
+    const [fx, fy] = draftPoints[0]
+    const dist = Math.hypot((p[0] - fx) * iw, (p[1] - fy) * ih)
+    if (dist < 12) return { point: draftPoints[0], snapped: true }
+  }
+  return { point: p, snapped: false }
 }
 
 function onDown(e: MouseEvent) {
-  const p = norm(e)
-  if (mode.value === 'rect') {
-    drawingRect = true
-    rectStart = p
-    draftPoints.length = 0
-    draftPoints.push(p)
-  } else if (mode.value === 'polygon') {
-    draftPoints.push(p)
+  const p = clamp01(norm(e))
+  if (mode.value === 'rect' || mode.value === 'line') {
+    // 点击-移动-点击：第一次点定起点，第二次点定终点
+    if (!pendingStart) {
+      pendingStart = p
+      draftPoints.length = 0
+      draftPoints.push(p)
+    } else {
+      draftPoints.splice(1, 1, p)
+      if (mode.value === 'rect') {
+        const [a, b] = draftPoints
+        if (Math.abs(a[0] - b[0]) > 0.005 && Math.abs(a[1] - b[1]) > 0.005) {
+          pendingShape.value = 'rect'
+          pendingStart = null
+        }
+      } else {
+        pendingShape.value = 'line'
+        pendingStart = null
+      }
+    }
     redraw()
-  } else if (mode.value === 'line') {
-    draftPoints.push(p)
-    if (draftPoints.length === 2) pendingShape.value = 'line'
+  } else if (mode.value === 'polygon') {
+    const { point, snapped } = snapToStart(p)
+    if (snapped && draftPoints.length >= 3) {
+      // 吸附回起点 = 闭合区域
+      pendingShape.value = 'polygon'
+    } else {
+      draftPoints.push(point)
+    }
     redraw()
   }
 }
 
 function onMove(e: MouseEvent) {
-  if (mode.value === 'rect' && drawingRect && rectStart) {
-    draftPoints.splice(1, 1, norm(e))
+  const raw = norm(e)
+  hoverPos.value = raw
+  if (pendingStart) {
+    // 终点随鼠标移动（拖拽线条预览）
+    draftPoints.splice(1, 1, clamp01(raw))
     redraw()
-  }
-}
-
-function onUp() {
-  if (mode.value === 'rect' && drawingRect) {
-    drawingRect = false
-    if (draftPoints.length === 2) {
-      const [a, b] = draftPoints
-      if (Math.abs(a[0] - b[0]) > 0.01 && Math.abs(a[1] - b[1]) > 0.01) pendingShape.value = 'rect'
-    }
+  } else if (mode.value === 'polygon' && draftPoints.length) {
     redraw()
   }
 }
@@ -207,19 +239,22 @@ function onDblClick() {
   }
 }
 
-/** 撤销一步：多边形/绊线移除上一个点，矩形取消本次拖拽 */
+/** 撤销一步：多边形移除上一个顶点；矩形/绊线回退到起点状态 */
 function undoStep() {
   if (!draftPoints.length) return
-  if (mode.value === 'rect') {
-    // 矩形一次拖拽即成形，撤销一步 = 清除矩形草稿
-    draftPoints.length = 0
-    rectStart = null
-    pendingShape.value = null
+  if (mode.value === 'rect' || mode.value === 'line') {
+    if (draftPoints.length === 2) {
+      draftPoints.pop()
+      pendingStart = draftPoints[0]
+      pendingShape.value = null
+    } else {
+      draftPoints.length = 0
+      pendingStart = null
+      pendingShape.value = null
+    }
   } else {
     draftPoints.pop()
-    // 顶点数不足时退出待保存状态
     if (mode.value === 'polygon' && draftPoints.length < 3) pendingShape.value = null
-    if (mode.value === 'line' && draftPoints.length < 2) pendingShape.value = null
   }
   redraw()
 }
@@ -227,7 +262,8 @@ function undoStep() {
 function cancelDraft() {
   draftPoints.length = 0
   pendingShape.value = null
-  rectStart = null
+  pendingStart = null
+  hoverPos.value = null
   redraw()
 }
 
@@ -236,12 +272,28 @@ function redraw() {
   if (!canvas) return
   const ctx = canvas.getContext('2d')!
   const w = canvas.width, h = canvas.height
+  const iw = w - PAD * 2, ih = h - PAD * 2
   ctx.clearRect(0, 0, w, h)
+
+  // ---- 遮罩层：快照有效区以外压暗 ----
+  ctx.fillStyle = 'rgba(0, 0, 0, .55)'
+  ctx.fillRect(0, 0, w, PAD)
+  ctx.fillRect(0, h - PAD, w, PAD)
+  ctx.fillRect(0, PAD, PAD, ih)
+  ctx.fillRect(w - PAD, PAD, PAD, ih)
+  ctx.strokeStyle = '#606266'
+  ctx.setLineDash([4, 4])
+  ctx.strokeRect(PAD, PAD, iw, ih)
+  ctx.setLineDash([])
+
+  // 以下绘制均在有效区坐标系内进行
+  ctx.save()
+  ctx.translate(PAD, PAD)
 
   // 已有 ROI
   for (const roi of rois.value) {
     ctx.beginPath()
-    roi.points.forEach(([x, y]: number[], i: number) => i ? ctx.lineTo(x * w, y * h) : ctx.moveTo(x * w, y * h))
+    roi.points.forEach(([x, y]: number[], i: number) => i ? ctx.lineTo(x * iw, y * ih) : ctx.moveTo(x * iw, y * ih))
     ctx.closePath()
     ctx.fillStyle = roi.color + '33'
     ctx.fill()
@@ -250,30 +302,52 @@ function redraw() {
     ctx.stroke()
     ctx.fillStyle = roi.color
     ctx.font = '12px sans-serif'
-    ctx.fillText(roi.shelf_name, roi.points[0][0] * w + 4, roi.points[0][1] * h - 6)
+    ctx.fillText(roi.shelf_name, roi.points[0][0] * iw + 4, roi.points[0][1] * ih - 6)
   }
   // 已有绊线
   for (const line of lines.value) {
-    drawLine(ctx, line.points, '#F56C6C', line.name, w, h)
+    drawLine(ctx, line.points, '#F56C6C', line.name, iw, ih)
   }
+
   // 草稿
   if (draftPoints.length) {
     ctx.strokeStyle = '#FFEB3B'
     ctx.fillStyle = '#FFEB3B'
     ctx.lineWidth = 2
-    ctx.beginPath()
-    draftPoints.forEach(([x, y], i) => i ? ctx.lineTo(x * w, y * h) : ctx.moveTo(x * w, y * h))
     if (mode.value === 'rect' && draftPoints.length === 2) {
       const [a, b] = draftPoints
-      ctx.strokeRect(a[0] * w, a[1] * h, (b[0] - a[0]) * w, (b[1] - a[1]) * h)
+      ctx.strokeRect(a[0] * iw, a[1] * ih, (b[0] - a[0]) * iw, (b[1] - a[1]) * ih)
+      ctx.beginPath(); ctx.arc(a[0] * iw, a[1] * ih, 4, 0, 6.3); ctx.fill()
     } else {
+      ctx.beginPath()
+      draftPoints.forEach(([x, y], i) => i ? ctx.lineTo(x * iw, y * ih) : ctx.moveTo(x * iw, y * ih))
+      if (pendingShape.value === 'polygon') ctx.closePath()
       ctx.stroke()
-      for (const [x, y] of draftPoints) { ctx.beginPath(); ctx.arc(x * w, y * h, 4, 0, 6.3); ctx.fill() }
+      for (const [x, y] of draftPoints) { ctx.beginPath(); ctx.arc(x * iw, y * ih, 4, 0, 6.3); ctx.fill() }
+      // 多边形预览线：最后一个顶点 → 鼠标位置（起点弱吸附高亮）
+      if (mode.value === 'polygon' && hoverPos.value && !pendingShape.value) {
+        const { point, snapped } = snapToStart(clamp01(hoverPos.value))
+        const last = draftPoints[draftPoints.length - 1]
+        ctx.beginPath()
+        ctx.setLineDash([5, 5])
+        ctx.moveTo(last[0] * iw, last[1] * ih)
+        ctx.lineTo(point[0] * iw, point[1] * ih)
+        ctx.stroke()
+        ctx.setLineDash([])
+        if (snapped && draftPoints.length >= 3) {
+          ctx.beginPath()
+          ctx.arc(draftPoints[0][0] * iw, draftPoints[0][1] * ih, 8, 0, 6.3)
+          ctx.strokeStyle = '#67C23A'
+          ctx.lineWidth = 3
+          ctx.stroke()
+        }
+      }
     }
     if (pendingShape.value === 'line' && draftPoints.length === 2) {
-      drawArrow(ctx, draftPoints, w, h)
+      drawArrow(ctx, draftPoints, iw, ih)
     }
   }
+  ctx.restore()
 }
 
 function drawLine(ctx: CanvasRenderingContext2D, points: number[][], color: string, label: string, w: number, h: number) {
@@ -314,9 +388,31 @@ function enterVec(dx: number, dy: number): number[] {
   return [nx * sign, ny * sign]
 }
 
+/** 鞋带公式求多边形面积（归一化坐标） */
+function polygonArea(points: number[][]): number {
+  let s = 0
+  for (let i = 0; i < points.length; i++) {
+    const [x1, y1] = points[i]
+    const [x2, y2] = points[(i + 1) % points.length]
+    s += x1 * y2 - x2 * y1
+  }
+  return Math.abs(s) / 2
+}
+
 async function saveRoi() {
-  let points = draftPoints.map(p => p)
+  let points = draftPoints.map(p => clamp01(p))
   let shape = pendingShape.value!
+  // 闭合性验证：多边形至少 3 个顶点且面积不为 0
+  if (shape === 'polygon') {
+    if (points.length < 3) {
+      ElMessage.warning('多边形区域至少需要 3 个顶点才能闭合')
+      return
+    }
+    if (polygonArea(points) < 0.0005) {
+      ElMessage.warning('区域未有效闭合或面积过小，请调整顶点')
+      return
+    }
+  }
   if (shape === 'rect') {
     const [a, b] = points
     const [x1, y1] = [Math.min(a[0], b[0]), Math.min(a[1], b[1])]
@@ -337,11 +433,12 @@ async function saveRoi() {
 }
 
 async function saveLine() {
-  const dx = draftPoints[1][0] - draftPoints[0][0]
-  const dy = draftPoints[1][1] - draftPoints[0][1]
+  const pts = draftPoints.map(p => clamp01(p))
+  const dx = pts[1][0] - pts[0][0]
+  const dy = pts[1][1] - pts[0][1]
   await createLine({
     camera: cameraId.value, name: form.name,
-    points: draftPoints.map(p => p.map(v => +v.toFixed(4))),
+    points: pts.map(p => p.map(v => +v.toFixed(4))),
     enter_direction: [enterVec(dx, dy).map(v => +v.toFixed(4))],
   })
   ElMessage.success('绊线已保存')
@@ -383,8 +480,8 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
 <style scoped>
 .header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
-.editor-wrap { position: relative; width: 100%; background: #000; border-radius: 4px; overflow: hidden; min-height: 200px; display: flex; align-items: center; justify-content: center; }
-.bg { width: 100%; display: block; user-select: none; -webkit-user-drag: none; }
+.editor-wrap { position: relative; width: 100%; background: #1a1a1a; border-radius: 4px; overflow: hidden; min-height: 200px; display: flex; align-items: center; justify-content: center; }
+.bg { width: calc(100% - 120px); margin: 60px; display: block; user-select: none; -webkit-user-drag: none; }
 .overlay { position: absolute; top: 0; left: 0; cursor: crosshair; }
 .hint { margin-top: 8px; font-size: 12px; color: #909399; }
 .dot { display: inline-block; width: 12px; height: 12px; border-radius: 3px; }
