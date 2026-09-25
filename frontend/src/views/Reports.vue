@@ -81,8 +81,8 @@ onMounted(async () => {
 
 <style scoped>
 .header { display: flex; justify-content: space-between; align-items: center; }
-.stat-card { background: #f4f7fd; border-radius: 8px; padding: 14px; text-align: center; }
-.num { font-size: 22px; font-weight: 700; color: #409EFF; }
-.label { font-size: 12px; color: #909399; margin-top: 4px; }
+.stat-card { background: var(--brand-50); border: 1px solid var(--border-1); border-radius: var(--radius-md); padding: 14px; text-align: center; }
+.num { font-size: 22px; font-weight: 700; color: var(--brand-600); }
+.label { font-size: 12px; color: var(--text-3); margin-top: 4px; }
 .echart { width: 100%; height: 280px; margin-top: 16px; }
 </style>

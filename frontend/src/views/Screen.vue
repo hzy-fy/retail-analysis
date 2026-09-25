@@ -9,66 +9,62 @@
       </div>
     </div>
     <div class="screen-body">
-      <el-row :gutter="12">
-        <el-col :span="6">
-          <div class="panel">
-            <div class="panel-title">今日核心指标</div>
-            <div class="kpi">
-              <div class="kpi-item">
-                <div class="kpi-val">{{ dashboard.today_enter }}</div>
-                <div class="kpi-name">进店人次</div>
-              </div>
-              <div class="kpi-item">
-                <div class="kpi-val">{{ dashboard.today_exit }}</div>
-                <div class="kpi-name">离店人次</div>
-              </div>
-              <div class="kpi-item">
-                <div class="kpi-val">{{ dashboard.dwell_count }}</div>
-                <div class="kpi-name">驻留次数</div>
-              </div>
-              <div class="kpi-item">
-                <div class="kpi-val">{{ dashboard.avg_dwell }}s</div>
-                <div class="kpi-name">平均停留</div>
-              </div>
-              <div class="kpi-item alert">
-                <div class="kpi-val">{{ dashboard.pending_alarms }}</div>
-                <div class="kpi-name">待处理告警</div>
-              </div>
-              <div class="kpi-item">
-                <div class="kpi-val">{{ dashboard.alarms_today }}</div>
-                <div class="kpi-name">今日告警</div>
-              </div>
+      <!-- 左侧：四个区域 2×2 平分 -->
+      <div class="left-grid">
+        <div class="panel">
+          <div class="panel-title">今日核心指标</div>
+          <div class="kpi">
+            <div class="kpi-item">
+              <div class="kpi-val">{{ dashboard.today_enter }}</div>
+              <div class="kpi-name">进店人次</div>
+            </div>
+            <div class="kpi-item">
+              <div class="kpi-val">{{ dashboard.today_exit }}</div>
+              <div class="kpi-name">离店人次</div>
+            </div>
+            <div class="kpi-item">
+              <div class="kpi-val">{{ dashboard.dwell_count }}</div>
+              <div class="kpi-name">驻留次数</div>
+            </div>
+            <div class="kpi-item">
+              <div class="kpi-val">{{ dashboard.avg_dwell }}s</div>
+              <div class="kpi-name">平均停留</div>
+            </div>
+            <div class="kpi-item alert">
+              <div class="kpi-val">{{ dashboard.pending_alarms }}</div>
+              <div class="kpi-name">待处理告警</div>
+            </div>
+            <div class="kpi-item">
+              <div class="kpi-val">{{ dashboard.alarms_today }}</div>
+              <div class="kpi-name">今日告警</div>
             </div>
           </div>
-          <div class="panel" style="margin-top:12px">
-            <div class="panel-title">最新告警</div>
-            <div class="alarm-list">
-              <div v-for="a in dashboard.latest_alarms" :key="a.id" class="alarm-row" :class="a.level">
-                <el-tag :type="a.level === 'critical' ? 'danger' : 'warning'" size="small">{{ typeName(a.alarm_type) }}</el-tag>
-                <span class="msg">{{ a.message }}</span>
-                <span class="time">{{ a.created_at }}</span>
-              </div>
-              <el-empty v-if="!dashboard.latest_alarms?.length" description="暂无告警" :image-size="60" />
-            </div>
+        </div>
+        <div class="panel">
+          <div class="panel-title">客流趋势</div>
+          <div ref="trendRef" class="echart"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-title">区域热力图（{{ date || '今日' }}）</div>
+          <div ref="heatRef" class="echart"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-title">货架停留时长排行</div>
+          <div ref="barRef" class="echart"></div>
+        </div>
+      </div>
+      <!-- 右侧：告警独占一列，占满全高 -->
+      <div class="panel alarm-panel">
+        <div class="panel-title">最新告警</div>
+        <div class="alarm-list">
+          <div v-for="a in dashboard.latest_alarms" :key="a.id" class="alarm-row" :class="a.level">
+            <el-tag :type="a.level === 'critical' ? 'danger' : 'warning'" size="small">{{ typeName(a.alarm_type) }}</el-tag>
+            <span class="msg">{{ a.message }}</span>
+            <span class="time">{{ a.created_at }}</span>
           </div>
-        </el-col>
-        <el-col :span="10">
-          <div class="panel">
-            <div class="panel-title">区域热力图（{{ date || '今日' }}）</div>
-            <div ref="heatRef" class="echart"></div>
-          </div>
-          <div class="panel" style="margin-top:12px">
-            <div class="panel-title">货架停留时长排行</div>
-            <div ref="barRef" class="echart"></div>
-          </div>
-        </el-col>
-        <el-col :span="8">
-          <div class="panel">
-            <div class="panel-title">客流趋势</div>
-            <div ref="trendRef" class="echart"></div>
-          </div>
-        </el-col>
-      </el-row>
+          <el-empty v-if="!dashboard.latest_alarms?.length" description="暂无告警" :image-size="80" />
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -88,6 +84,12 @@ let trendChart: echarts.ECharts | null = null
 let heatChart: echarts.ECharts | null = null
 let barChart: echarts.ECharts | null = null
 let timer: number
+let resizeObserver: ResizeObserver | null = null
+
+/* 浅色主题坐标轴统一样式 */
+const AXIS_LABEL = { color: '#5b6b7d', fontSize: 11 }
+const SPLIT_LINE = { lineStyle: { color: '#ecf1f7' } }
+const AXIS_LINE = { lineStyle: { color: '#d4dee9' } }
 
 function typeName(t: string) {
   return { crowd: '区域拥挤', loiter: '异常逗留', fall: '摔倒' }[t] || t
@@ -101,60 +103,74 @@ function toggleFullscreen() {
   }
 }
 
-function initTrend(data: any) {
+function renderTrend(data: any) {
   if (!trendRef.value) return
-  trendChart = echarts.init(trendRef.value, 'dark')
+  if (!trendChart) trendChart = echarts.init(trendRef.value)
   trendChart.setOption({
     tooltip: { trigger: 'axis' },
-    grid: { left: 50, right: 20, top: 30, bottom: 24 },
-    xAxis: { type: 'category', data: Array.from({ length: 24 }, (_, i) => `${i}h`) },
-    yAxis: { type: 'value' },
+    legend: { data: ['进店', '离店'], top: 0, textStyle: { color: '#5b6b7d' } },
+    grid: { left: 42, right: 16, top: 34, bottom: 26 },
+    xAxis: { type: 'category', boundaryGap: false, data: Array.from({ length: 24 }, (_, i) => `${i}h`),
+      axisLabel: AXIS_LABEL, axisLine: AXIS_LINE },
+    yAxis: { type: 'value', axisLabel: AXIS_LABEL, splitLine: SPLIT_LINE },
     series: [
-      { name: '进店', type: 'line', smooth: true, areaStyle: { opacity: .3 }, data: data.enter },
-      { name: '离店', type: 'line', smooth: true, data: data.exit },
+      { name: '进店', type: 'line', smooth: true, symbol: 'circle', symbolSize: 5,
+        itemStyle: { color: '#3b82c4' },
+        areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: 'rgba(59,130,196,.28)' }, { offset: 1, color: 'rgba(59,130,196,.02)' }]) },
+        data: data.enter },
+      { name: '离店', type: 'line', smooth: true, symbol: 'circle', symbolSize: 5,
+        itemStyle: { color: '#e0a030' },
+        data: data.exit },
     ],
-    legend: { data: ['进店', '离店'], top: 0 },
-  })
+  }, { notMerge: true })
+  trendChart.off('click')
   trendChart.on('click', (params: any) => {
     const hour = params.dataIndex
-    // 时段下钻：跳转时段明细（简化处理：用 route query 传参，由用户进一步查看）
+    // 时段下钻
     console.log('时段下钻', hour)
   })
 }
 
-function initHeat(data: any) {
+function renderHeat(data: any) {
   if (!heatRef.value) return
-  heatChart = echarts.init(heatRef.value, 'dark')
+  if (!heatChart) heatChart = echarts.init(heatRef.value)
   const xData = Array.from({ length: data.grid_w }, (_, i) => i)
   const yData = Array.from({ length: data.grid_h }, (_, i) => i)
   heatChart.setOption({
     tooltip: { position: 'top' },
-    grid: { left: 40, right: 10, top: 10, bottom: 40 },
-    xAxis: { type: 'category', data: xData, show: false },
-    yAxis: { type: 'category', data: yData, show: false, inverse: true },
-    visualMap: { min: 0, max: 100, calculable: true, orient: 'horizontal', bottom: 0, left: 'center' },
+    grid: { left: 30, right: 14, top: 10, bottom: 46 },
+    xAxis: { type: 'category', data: xData, show: false, splitLine: { show: false } },
+    yAxis: { type: 'category', data: yData, show: false, inverse: true, splitLine: { show: false } },
+    visualMap: { min: 0, max: 100, calculable: true, orient: 'horizontal', bottom: 4, left: 'center',
+      itemWidth: 12, itemHeight: 120, textStyle: { color: '#5b6b7d', fontSize: 11 },
+      inRange: { color: ['#eaf2fa', '#7fb2dc', '#2f6fae', '#1d3f6b'] } },
     series: [{
       name: '热力', type: 'heatmap', data: data.data,
-      emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,.5)' } },
+      emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(47,111,174,.4)' } },
     }],
-  })
+  }, { notMerge: true })
 }
 
-function initBar(rows: any[]) {
+function renderBar(rows: any[]) {
   if (!barRef.value) return
-  barChart = echarts.init(barRef.value, 'dark')
+  if (!barChart) barChart = echarts.init(barRef.value)
   const names = rows.map(r => r.roi__shelf_name || `货架${r.roi_id}`)
   const values = rows.map(r => +(r.total_duration || 0).toFixed(1))
   barChart.setOption({
     tooltip: { trigger: 'axis' },
-    grid: { left: 100, right: 20, top: 10, bottom: 24 },
-    xAxis: { type: 'value' },
-    yAxis: { type: 'category', data: names, inverse: true },
+    grid: { left: 90, right: 24, top: 10, bottom: 26 },
+    xAxis: { type: 'value', axisLabel: AXIS_LABEL, splitLine: SPLIT_LINE },
+    yAxis: { type: 'category', data: names, inverse: true,
+      axisLabel: { ...AXIS_LABEL, width: 82, overflow: 'truncate' }, axisLine: AXIS_LINE },
     series: [{
-      type: 'bar', data: values,
-      itemStyle: { borderRadius: [0, 4, 4, 0], color: new echarts.graphic.LinearGradient(0,0,1,0,[{offset:0,color:'#5470c6'},{offset:1,color:'#91cc75'}]) },
+      type: 'bar', data: values, barMaxWidth: 18,
+      itemStyle: { borderRadius: [0, 6, 6, 0],
+        color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+          { offset: 0, color: '#9dc1e2' }, { offset: 1, color: '#2f6fae' }]) },
     }],
-  })
+  }, { notMerge: true })
+  barChart.off('click')
   barChart.on('click', (params: any) => {
     const roiId = rows[params.dataIndex]?.roi_id
     if (roiId) {
@@ -171,9 +187,10 @@ async function fetchAll() {
       getDashboard(params), getTrafficTrend(params), getHeatmap(params), getDwellByRoi(params),
     ])
     Object.assign(dashboard, d)
-    initTrend(trend)
-    initHeat(heat)
-    initBar(dwell)
+    await nextTick()
+    renderTrend(trend)
+    renderHeat(heat)
+    renderBar(dwell)
   } catch (e) { /* 拦截器已提示 */ }
 }
 
@@ -181,30 +198,78 @@ onMounted(async () => {
   await nextTick()
   fetchAll()
   timer = window.setInterval(fetchAll, 30000)
-  const onResize = () => { trendChart?.resize(); heatChart?.resize(); barChart?.resize() }
-  window.addEventListener('resize', onResize)
+  // 容器尺寸变化（含全屏、侧栏切换）时重绘图表
+  resizeObserver = new ResizeObserver(() => {
+    trendChart?.resize()
+    heatChart?.resize()
+    barChart?.resize()
+  })
+  if (trendRef.value) resizeObserver.observe(trendRef.value)
+  if (heatRef.value) resizeObserver.observe(heatRef.value)
+  if (barRef.value) resizeObserver.observe(barRef.value)
 })
 
-onUnmounted(() => { clearInterval(timer); trendChart?.dispose(); heatChart?.dispose(); barChart?.dispose() })
+onUnmounted(() => {
+  clearInterval(timer)
+  resizeObserver?.disconnect()
+  trendChart?.dispose(); heatChart?.dispose(); barChart?.dispose()
+})
 </script>
 
 <style scoped>
-.screen { min-height: 100vh; background: #080c1a; color: #cfd7e0; padding: 12px; }
-.fullscreen { padding: 12px; }
-.screen-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-.screen-header h1 { font-size: 20px; color: #fff; letter-spacing: 1px; }
+/* 高度闭合：扣除顶栏 60px 与主区上下 padding 36px */
+.screen {
+  height: calc(100vh - 96px);
+  display: flex; flex-direction: column;
+  background: var(--blue-gray-100);
+  color: var(--text-1);
+}
+.screen-header { flex: none; display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.screen-header h1 { font-size: 19px; font-weight: 700; color: var(--text-1); letter-spacing: .5px; }
 .toolbar { display: flex; align-items: center; gap: 8px; }
-.screen-body { display: flex; flex-direction: column; gap: 12px; }
-.panel { background: #0f1428; border: 1px solid #1a2140; border-radius: 8px; padding: 12px; }
-.panel-title { font-size: 14px; font-weight: 600; color: #93a5be; margin-bottom: 8px; }
-.echart { width: 100%; height: 240px; }
-.kpi { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.kpi-item { background: #13192e; border-radius: 6px; padding: 10px; text-align: center; }
-.kpi-val { font-size: 22px; font-weight: 700; color: #5aa1ff; }
-.kpi-item.alert .kpi-val { color: #f56c6c; }
-.kpi-name { font-size: 12px; color: #7a8ba8; margin-top: 4px; }
-.alarm-list { max-height: 240px; overflow-y: auto; }
-.alarm-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #1a2140; font-size: 12px; }
-.alarm-row .msg { flex: 1; }
-.alarm-row .time { color: #6b7a95; }
+
+/* 主体：左 flex:1（2×2 等分），右告警列固定 300px 占满全高 */
+.screen-body { flex: 1; min-height: 0; display: flex; gap: 12px; }
+.left-grid {
+  flex: 1; min-width: 0; min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 12px;
+}
+
+/* 面板：白底卡片，内部 flex 列让图表填满 */
+.panel {
+  display: flex; flex-direction: column; min-height: 0; min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  padding: 14px 16px;
+  overflow: hidden;
+}
+.panel-title { flex: none; font-size: 14px; font-weight: 650; color: var(--text-1); margin-bottom: 10px;
+  padding-left: 8px; border-left: 3px solid var(--brand-500); line-height: 14px; }
+
+.echart { flex: 1; min-height: 0; width: 100%; }
+
+/* KPI */
+.kpi { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: 1fr 1fr; gap: 10px; }
+.kpi-item {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: var(--brand-50); border: 1px solid var(--border-1);
+  border-radius: var(--radius-md); padding: 8px; text-align: center;
+}
+.kpi-val { font-size: 24px; font-weight: 750; color: var(--brand-600); line-height: 1.2; }
+.kpi-item.alert .kpi-val { color: #e05b5b; }
+.kpi-name { font-size: 12px; color: var(--text-3); margin-top: 5px; }
+
+/* 右侧告警列 */
+.alarm-panel { flex: 0 0 300px; }
+.alarm-list { flex: 1; min-height: 0; overflow-y: auto; padding-right: 4px; }
+.alarm-row { display: flex; align-items: center; gap: 8px; padding: 9px 4px;
+  border-bottom: 1px solid var(--blue-gray-300); font-size: 12px; }
+.alarm-row .msg { flex: 1; min-width: 0; color: var(--text-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.alarm-row .time { flex: none; color: var(--text-3); font-size: 11px; }
 </style>

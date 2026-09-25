@@ -266,16 +266,16 @@ onUnmounted(() => {
 
 <style scoped>
 .card-header { display: flex; align-items: center; justify-content: space-between; }
-.canvas-wrap { position: relative; width: 100%; min-height: 300px; background: #000; border-radius: 4px; overflow: hidden; }
+.canvas-wrap { position: relative; width: 100%; min-height: 300px; background: #101820; border-radius: var(--radius-md); overflow: hidden; }
 .monitor-canvas { width: 100%; display: block; }
 .error-tip { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #F56C6C; background: rgba(0,0,0,.6); gap: 8px; }
 .stats { display: flex; justify-content: space-around; text-align: center; }
-.num { font-size: 28px; font-weight: 700; color: #409EFF; }
-.num.in { color: #67C23A; }
-.num.out { color: #E6A23C; }
-.label { font-size: 12px; color: #909399; margin-top: 4px; }
+.num { font-size: 28px; font-weight: 700; color: var(--brand-600); }
+.num.in { color: #4caf7d; }
+.num.out { color: #e0a030; }
+.label { font-size: 12px; color: var(--text-3); margin-top: 4px; }
 .alarm-feed { max-height: 200px; overflow-y: auto; }
-.alarm-item { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #f0f0f0; font-size: 12px; }
-.alarm-item .msg { flex: 1; color: #606266; }
-.alarm-item .time { color: #c0c4cc; }
+.alarm-item { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border-1); font-size: 12px; }
+.alarm-item .msg { flex: 1; color: var(--text-2); }
+.alarm-item .time { color: var(--text-3); }
 </style>

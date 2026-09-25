@@ -483,6 +483,6 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 .editor-wrap { position: relative; width: 100%; background: #1a1a1a; border-radius: 4px; overflow: hidden; min-height: 200px; display: flex; align-items: center; justify-content: center; }
 .bg { width: calc(100% - 120px); margin: 60px; display: block; user-select: none; -webkit-user-drag: none; }
 .overlay { position: absolute; top: 0; left: 0; cursor: crosshair; }
-.hint { margin-top: 8px; font-size: 12px; color: #909399; }
+.hint { margin-top: 8px; font-size: 12px; color: var(--text-3); }
 .dot { display: inline-block; width: 12px; height: 12px; border-radius: 3px; }
 </style>

@@ -1,11 +1,11 @@
 <template>
   <el-container class="layout">
-    <el-aside width="210px" class="aside">
+    <el-aside width="218px" class="aside">
       <div class="logo">
-        <el-icon :size="24" color="#409EFF"><View /></el-icon>
+        <div class="logo-badge"><el-icon :size="18"><View /></el-icon></div>
         <span>寻觅客 · 新零售追踪</span>
       </div>
-      <el-menu :default-active="$route.path" router background-color="#001529" text-color="#a6adb4" active-text-color="#fff">
+      <el-menu :default-active="$route.path" router class="side-menu">
         <el-menu-item index="/monitor"><el-icon><Monitor /></el-icon><span>实时监控</span></el-menu-item>
         <el-menu-item index="/screen"><el-icon><DataAnalysis /></el-icon><span>数据大屏</span></el-menu-item>
         <el-menu-item index="/roi"><el-icon><Aim /></el-icon><span>ROI 区域管理</span></el-menu-item>
@@ -73,13 +73,65 @@ onUnmounted(() => clearInterval(timer))
 
 <style scoped>
 .layout { height: 100%; }
-.aside { background: #001529; }
-.logo { display: flex; align-items: center; gap: 8px; color: #fff; font-weight: 600; padding: 18px 16px; font-size: 15px; }
-.aside :deep(.el-menu) { border-right: none; }
-.header { display: flex; align-items: center; justify-content: space-between; background: #fff; border-bottom: 1px solid #eee; }
-.title { font-size: 16px; font-weight: 600; }
+/* 侧边栏：白底 + 右侧细分割线 */
+.aside {
+  background: var(--surface);
+  border-right: 1px solid var(--border-1);
+  box-shadow: 2px 0 12px rgba(43, 75, 110, .03);
+  z-index: 5;
+}
+.logo {
+  display: flex; align-items: center; gap: 10px;
+  color: var(--text-1); font-weight: 700;
+  padding: 20px 18px; font-size: 15px; letter-spacing: .3px;
+}
+.logo-badge {
+  width: 32px; height: 32px; border-radius: 9px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff;
+  background: linear-gradient(135deg, var(--brand-400), var(--brand-600));
+  box-shadow: 0 3px 8px rgba(59, 130, 196, .35);
+}
+
+/* 菜单项：胶囊式选中态，浅蓝灰底 + 主色文字 + 左侧指示条 */
+.side-menu { padding: 6px 10px; background: transparent; }
+.side-menu :deep(.el-menu-item) {
+  height: 44px; line-height: 44px;
+  margin: 4px 0; border-radius: 8px;
+  color: var(--text-2);
+  position: relative;
+}
+.side-menu :deep(.el-menu-item .el-icon) { color: inherit; font-size: 17px; }
+.side-menu :deep(.el-menu-item:hover) {
+  background: var(--blue-gray-200);
+  color: var(--brand-600);
+}
+.side-menu :deep(.el-menu-item.is-active) {
+  background: var(--brand-100);
+  color: var(--brand-600);
+  font-weight: 600;
+}
+.side-menu :deep(.el-menu-item.is-active::before) {
+  content: ''; position: absolute; left: 0; top: 10px; bottom: 10px;
+  width: 3px; border-radius: 2px;
+  background: linear-gradient(var(--brand-400), var(--brand-600));
+}
+
+.header {
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border-1);
+  box-shadow: 0 1px 6px rgba(43, 75, 110, .04);
+  z-index: 4;
+}
+.title { font-size: 16px; font-weight: 650; color: var(--text-1); }
 .right { display: flex; align-items: center; gap: 16px; }
-.alarm-tag { cursor: pointer; }
-.user { display: flex; align-items: center; gap: 4px; cursor: pointer; }
-.main { background: #f0f2f5; overflow-y: auto; }
+.alarm-tag { cursor: pointer; border-radius: 999px; }
+.user { display: flex; align-items: center; gap: 5px; cursor: pointer; color: var(--text-2); outline: none; }
+.user:hover { color: var(--brand-600); }
+.main {
+  background: var(--blue-gray-100);
+  overflow-y: auto;
+  padding: 18px;
+}
 </style>

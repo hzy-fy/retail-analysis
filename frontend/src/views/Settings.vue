@@ -50,5 +50,5 @@ onMounted(load)
 </script>
 
 <style scoped>
-.hint { margin-left: 12px; font-size: 12px; color: #909399; }
+.hint { margin-left: 12px; font-size: 12px; color: var(--text-3); }
 </style>
