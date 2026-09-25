@@ -19,14 +19,14 @@ from .models import (Camera, ShelfROI, CrossingLine, TrackPoint, DwellRecord,
 
 
 def _seg_intersect(p1, p2, p3, p4):
-    """判断线段 p1p2 与 p3p4 是否相交"""
+    """判断线段 p1p2 与 p3p4 是否相交（含端点相接/共线踩线帧，避免跨线帧恰好落在线上时漏判）"""
     def cross(o, a, b):
         return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
     d1 = cross(p3, p4, p1)
     d2 = cross(p3, p4, p2)
     d3 = cross(p1, p2, p3)
     d4 = cross(p1, p2, p4)
-    return ((d1 > 0) != (d2 > 0)) and ((d3 > 0) != (d4 > 0))
+    return d1 * d2 <= 0 and d3 * d4 <= 0
 
 
 class CameraEngine(threading.Thread):
@@ -82,7 +82,7 @@ class CameraEngine(threading.Thread):
         dwell_state = {}          # (track_id, roi_id) -> {'record': DwellRecord, 'last_inside': ts}
         track_trail = defaultdict(list)   # track_id -> [(x,y), ...] 最近轨迹
         track_last_point = {}     # track_id -> ts 上次入库轨迹点时间
-        track_prev_center = {}    # track_id -> (x, y) 上一帧中心
+        track_prev_center = {}    # track_id -> (x, y) 上一帧脚底点（用于绊线穿越判定）
         line_cooldown = {}        # (track_id, line_id) -> ts 穿越冷却
         fall_state = {}           # track_id -> {'count': int, 'alarmed': bool}
         crowd_cooldown = {}       # roi_id -> ts
@@ -158,7 +158,7 @@ class CameraEngine(threading.Thread):
                                     camera, 'loiter', f'顾客#{tid} 在「{roi.shelf_name}」逗留超过 {int(dwell_sec)} 秒',
                                     track_id=tid, roi=roi))
 
-                    # ---- 绊线客流 ----
+                    # ---- 绊线客流（以脚底点轨迹判定：绊线画在地面，胸口中心永远在线上方会漏判）----
                     prev = track_prev_center.get(tid)
                     if prev:
                         for line in lines:
@@ -166,16 +166,18 @@ class CameraEngine(threading.Thread):
                             if (tid, line.id) in line_cooldown and \
                                     time.time() - line_cooldown[(tid, line.id)] < 3:
                                 continue
-                            if _seg_intersect(prev, (cx, cy), lp[0], lp[1]):
+                            if _seg_intersect(prev, (foot_x, foot_y), lp[0], lp[1]):
                                 line_vec = (lp[1][0] - lp[0][0], lp[1][1] - lp[0][1])
-                                move_vec = (cx - prev[0], cy - prev[1])
+                                move_vec = (foot_x - prev[0], foot_y - prev[1])
                                 cross_z = line_vec[0] * move_vec[1] - line_vec[1] * move_vec[0]
                                 enter_vec = line.enter_direction[0] if line.enter_direction else [0, 1]
-                                # 进店方向与 cross_z 符号对应
-                                is_enter = (cross_z > 0) == (enter_vec[0] * line_vec[1] - enter_vec[1] * line_vec[0] > 0)
-                                line_cooldown[(tid, line.id)] = time.time()
-                                self._count_traffic(camera, today, now.hour, is_enter)
-                    track_prev_center[tid] = (cx, cy)
+                                # cross_z = 绊线×移动向量；进店 = 移动方向与进店法向量在绊线同侧
+                                enter_z = line_vec[0] * enter_vec[1] - line_vec[1] * enter_vec[0]
+                                is_enter = (cross_z > 0) == (enter_z > 0) if cross_z else None
+                                if is_enter is not None:
+                                    line_cooldown[(tid, line.id)] = time.time()
+                                    self._count_traffic(camera, today, now.hour, is_enter)
+                    track_prev_center[tid] = (foot_x, foot_y)
 
                     # ---- 摔倒/异常姿态（启发式）----
                     bw, bh = (x2 - x1) / w, (y2 - y1) / h
