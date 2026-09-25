@@ -104,7 +104,8 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { getCameras, getRois, createRoi, deleteRoi, getLines, createLine, deleteLine, snapshotUrl } from '../api'
+import request from '../api/request'
+import { getCameras, getRois, createRoi, deleteRoi, getLines, createLine, deleteLine } from '../api'
 
 const mode = ref<string | null>(null)
 const rois = ref<any[]>([])
@@ -133,16 +134,19 @@ async function loadData() {
   loadSnapshot()
 }
 
-function loadSnapshot() {
+async function loadSnapshot() {
   snapshotLoading.value = true
   snapshotOk.value = false
-  imgSrc.value = `${snapshotUrl(cameraId.value)}?t=${Date.now()}`
-  // onerror/onload 由 img 标签事件处理
-  setTimeout(() => {
-    const img = imgRef.value
-    if (img && img.complete && img.naturalWidth) { snapshotOk.value = true }
+  try {
+    // 用 axios 携带 Token 拉取快照（<img> 无法带 Authorization 头）
+    const blob: any = await request.get(`/cameras/${cameraId.value}/snapshot/`, { responseType: 'blob' })
+    imgSrc.value = URL.createObjectURL(blob)
+    snapshotOk.value = true   // <img> 加载成功后 onImgLoad 会初始化画布
+  } catch {
+    snapshotOk.value = false
+  } finally {
     snapshotLoading.value = false
-  }, 3000)
+  }
 }
 
 function onImgLoad() {
