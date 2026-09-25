@@ -12,7 +12,8 @@
             </el-radio-group>
             <div>
               <el-button size="small" @click="loadSnapshot">刷新底图</el-button>
-              <el-button size="small" :disabled="!draftPoints.length" @click="cancelDraft">撤销草稿</el-button>
+              <el-button size="small" :disabled="!draftPoints.length" @click="undoStep">撤销一步</el-button>
+              <el-button size="small" type="danger" plain :disabled="!draftPoints.length && !pendingShape" @click="cancelDraft">清除草稿</el-button>
             </div>
           </div>
         </template>
@@ -102,7 +103,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import request from '../api/request'
 import { getCameras, getRois, createRoi, deleteRoi, getLines, createLine, deleteLine } from '../api'
@@ -204,6 +205,23 @@ function onDblClick() {
     pendingShape.value = 'polygon'
     redraw()
   }
+}
+
+/** 撤销一步：多边形/绊线移除上一个点，矩形取消本次拖拽 */
+function undoStep() {
+  if (!draftPoints.length) return
+  if (mode.value === 'rect') {
+    // 矩形一次拖拽即成形，撤销一步 = 清除矩形草稿
+    draftPoints.length = 0
+    rectStart = null
+    pendingShape.value = null
+  } else {
+    draftPoints.pop()
+    // 顶点数不足时退出待保存状态
+    if (mode.value === 'polygon' && draftPoints.length < 3) pendingShape.value = null
+    if (mode.value === 'line' && draftPoints.length < 2) pendingShape.value = null
+  }
+  redraw()
 }
 
 function cancelDraft() {
@@ -345,7 +363,22 @@ async function onDeleteLine(id: number) {
   redraw()
 }
 
-onMounted(loadData)
+function onKeydown(e: KeyboardEvent) {
+  // Ctrl+Z 撤销上一步画笔（输入框聚焦时不拦截）
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+    const tag = (e.target as HTMLElement)?.tagName
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return
+    e.preventDefault()
+    undoStep()
+  }
+}
+
+onMounted(() => {
+  loadData()
+  window.addEventListener('keydown', onKeydown)
+})
+
+onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 </script>
 
 <style scoped>
